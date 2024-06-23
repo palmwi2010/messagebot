@@ -15,6 +15,9 @@ API_KEY = os.getenv('API_KEY')
 
 # cl100k works with ada-002 model
 tokenizer = tiktoken.get_encoding("cl100k_base")
+
+# Set chat to load
+chat_title = 'familychats'
         
 def parse_transcript(chat_title):
     """ Parse raw message data into timestamps, senders and messages. Chat title determines what chat to take"""
@@ -31,7 +34,7 @@ def parse_transcript(chat_title):
             
     # Loop through lines to clean
     message_rows = []
-    for line in lines[1:]:
+    for line in lines[18000:]:
                 
         # Find date and time
         pattern = r"\[(\d\d/\d\d/\d\d\d\d),\s(\d\d?:\d\d:\d\d\s?[A-Z]?M?)[^A-Za-z]*\s([A-Za-z]+\s?[A-Za-z]*):\s(.*)"
@@ -94,7 +97,7 @@ def parse_transcript(chat_title):
     df.drop(['hr'], axis=1, inplace=True)
     
     # Save to csv
-    df.to_csv('parsed_transcript.csv', index=False, encoding='utf-8-sig')    
+    df.to_csv(f'processed/parsed_transcript_{chat_title}.csv', index=False, encoding='utf-8-sig')    
 
 def make_conversations(texts, conversation_len = 15, rolling_window = 0.5, max_tokens = 500):
     """Function to create rolling conversations"""
@@ -156,10 +159,10 @@ def get_embeddings(df):
 
     return df
 
-def preprocessor():
+def preprocessor(chat_title):
     
     # Load csv file
-    df = pd.read_csv('./parsed_transcript.csv')
+    df = pd.read_csv(f'./processed/parsed_transcript_{chat_title}.csv')
     
     # Tokenizer
     df['n_tokens'] = df['gpt_str'].apply(lambda x: len(tokenizer.encode(x)))
@@ -177,25 +180,30 @@ def preprocessor():
     # Get embeddings
     df = get_embeddings(df)
     df = df.dropna(axis=0)
-    df.to_csv('./embeddings.csv')
     
-def compress_csv():
-    df = pd.read_csv('./embeddings.csv', index_col=0)
+    # Save to CSV - mainly as backup
+    try:
+        df.to_csv(f'embeddings/embeddings_{chat_title}.csv', index=False)
+    except:
+        print("Error saving embedding as csv")
+        
+    # Apply eval to convert embedding to numpy array
+    try:
+        df['embeddings'] = df['embeddings'].apply(eval).apply(np.array)
+    except:
+        print("Error converting embeddings to np array. Saving with string embeddings...")
+        
+    # Save as pickle file
+    try:
+        df.to_pickle(f'embeddings/embeddings_{chat_title}.csv')
+    except:
+        print("Error saving embedding as pickle")    
     
-    df.to_pickle('./embeddings_check.pkl')
-    
-def check_read():
-    df = pd.read_pickle('./embeddings_check.pkl')
-    
-    print(df.head())
     
 def timer(start, func = "Ran", run_timer = True):
     if run_timer:
         print(f"{func} in {round(time.time() - start,2)} seconds")
-    
-def checker():
-    
-    df = pd.read_pickle('embeddings_check_embed.pkl')
+
     
 def delay(x):
     time.sleep(x)
@@ -218,11 +226,8 @@ def clean_output(msg):
     msg_str = '\n'.join(new_array)
     
     return msg_str
-    
-#test = "Will: Hey!\nWhat's up?"
 
-#print(clean_output(test))
+#parse_transcript(chat_title)
+#preprocessor(chat_title)
 
-#start = time.time()
-#checker()
-#print(f"Ran in {time.time()-start} seconds")
+#def checker()

@@ -7,6 +7,7 @@ import time
 from utils import timer, clean_output
 import os
 from dotenv import load_dotenv
+import re
 
 # Load environment variables
 load_dotenv()
@@ -58,17 +59,7 @@ def create_context(question, df, max_len = 1000):
     return "\n\n###\n\n".join(returns)
 
 
-def answer_question(
-    question,
-    df,
-    model = "gpt-4o",
-    #model = "gpt-3.5-turbo",
-    max_len = 500,
-    debug = False,
-    max_tokens = 150,
-    stop_sequence = None,
-    rolling_context = ""
-):
+def answer_question(question, df, model = "gpt-4o", max_len = 500, debug = False, max_tokens = 150, stop_sequence = None, rolling_context = ""):
     """Answer a question based on the most similar context from the dataframe texts"""
 
     # Create a context
@@ -103,18 +94,32 @@ def answer_question(
         return ""
 
 
-def run_program():
+def run_program(chat_title):
     """Program to run chatbot until user quits"""
-    
-    # INITIALIZATION
-    
+        
     # Load in df
+    df = pd.read_pickle(f'./embeddings/embeddings_{chat_title}.pkl')
+
+    # If embedding has not been converted to np array, do this now
+    if type(df['embeddings'][0]) == 'str':
+        print("Embeddings not saved as np array. Converting from string now...")
+        df['embeddings'] = df['embeddings'].apply(eval).apply(np.array)
+        
+    # Find chat members
     start = time.time()
-    df = pd.read_pickle('./embeddings/embeddings_check_embed.pkl')
-    #df = pd.read_csv('embeddings.csv', index_col = 0)
-    #df['embeddings'] = df['embeddings'].apply(eval).apply(np.array)
-    timer(start, func = "Read embeddings df", run_timer = run_timers)
-    
+    members = []
+    for message in df['text']:
+        for line in message.split('\n'):
+            match = re.match(r'^([A-Za-z]+\s?[A-Za-z]*):', line)
+            if match is not None:
+                member = match.group(1)
+                if member not in members:
+                    members.append(member)
+    timer(start, "Found members")
+    print(members)
+        
+        
+    # Preset rolling context to blank string
     rolling_context = ""
     
     while True:
@@ -145,33 +150,6 @@ def run_program():
         if rolling_context != "":
             rolling_context += '\n'    
         rolling_context = previous_msgs
-        
-        
-def run_program_bot(question, rolling_context):
-    """Program to run chatbot from whatsapp bot"""
-    
-    # INITIALIZATION
-    
-    # Load in df
-    df = pd.read_pickle('embeddings_check_embed.pkl')
-    rolling_context = ""
-    
-    # Get chat response
-    output = answer_question("Daisy: " + prompt, df, rolling_context = rolling_context)
-    
-    # Format new lines properly
-    output = clean_output(output)
-    
-    # Combine prompt and output into a string and print
-    previous_msgs = "\n".join([f"Daisy: {prompt}", f"{output}"])
-    
-    # Make generated conversation
-    print(f"Generated conversation:\n{previous_msgs}")
-    
-    # Create remembered context
-    if rolling_context != "":
-        rolling_context += '\n'    
-    rolling_context = previous_msgs
     
 
-run_program()
+run_program('daisy')
