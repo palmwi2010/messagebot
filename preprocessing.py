@@ -118,23 +118,24 @@ def parse_transcript(chat_title):
     # Save to csv
     df.to_csv(f'processed/parsed_transcript_{chat_title}.csv', index=False, encoding='utf-8-sig')    
 
-def make_conversations(texts, conversation_len = 15, rolling_window = 0.5, max_tokens = 500, max_conversations = 1e6):
+def make_conversations(texts, conversation_len = 15, rolling_window = 0.5, max_tokens = 500, max_conversations = 1e6, max_tokens_total = 8e5):
     """Function to create rolling conversations"""
     
     # Preallocate conversations
     conversations = []
     current_tokens = 0
+    current_tokens_total = 0
     conversation = []
     
     # Preset indices
-    lagger = 0
-    leader = 0
+    lagger = len(texts) - 1
+    leader = len(texts) - 1
     
     # Loop through text and add to conversations
-    while lagger < len(texts) and len(conversations) < max_conversations:
+    while lagger > 0 and len(conversations) < max_conversations:
         
         # Set text
-        if leader >= len(texts):
+        if leader < 0:
             break
         text = texts[leader]
         
@@ -149,19 +150,22 @@ def make_conversations(texts, conversation_len = 15, rolling_window = 0.5, max_t
             current_tokens += n_tokens
             
             # Add one to leader and lagger
-            leader += 1
-            lagger += rolling_window
+            leader -= 1
+            lagger -= rolling_window
         else:
             # If we're full, reset indices
             if len(conversation) == 0:
-                leader += 1
+                leader -= 1
             else:
-                leader = math.ceil(lagger)
+                leader = math.floor(lagger)
             lagger = leader
             
             # Add conversation to the list
             conversations.append("\n".join(conversation))
             conversation = []
+            current_tokens_total += current_tokens
+            if current_tokens_total > max_tokens_total:
+                break
             current_tokens = 0
 
     return conversations

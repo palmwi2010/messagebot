@@ -4,19 +4,19 @@ from selenium.webdriver.common.keys import Keys
 from bs4 import BeautifulSoup
 import time
 import re
-from engine import answer_question
+from engine import ChatEngine
 from utils import delay, clean_output
 import pandas as pd
 
 
 class WhatsAppBot():
-    def __init__(self, chat_label, df):
-        self.df = df
+    def __init__(self, chat_label):
         self.chat_label = chat_label
         self.messages = None
         self.editable_div = None
         self.prompt_row_length = 5
         self.msg_refresh_delay = 15
+        self.engine = ChatEngine(chat_label, mood = "sad")
     
     
     def initialize_driver(self):
@@ -65,6 +65,9 @@ class WhatsAppBot():
                 parent_div = msg.parent.parent
                 data_pre_plain_text = parent_div.get('data-pre-plain-text')
                 
+                if data_pre_plain_text is None:
+                    continue
+                
                 # Use re library to find just name
                 match = re.search('([A-Za-z]+):', data_pre_plain_text)
                 name = match.group(1)
@@ -87,14 +90,24 @@ class WhatsAppBot():
 
         # Loop back through from idx
         question_list = rows_test[start_idx:]
-        gpt_msgs = [row['gpt_msg'] for row in question_list]
-        prompt = '\n'.join(gpt_msgs)
+        #gpt_msgs = [row['gpt_msg'] for row in question_list]
+        
+        # Create gpt messages
+        gpt_msgs = []
+        for row in question_list:
+            if row['sender'] == self.engine.responder:
+                gpt_msgs.append({'role': 'assistant', 'content': row['gpt_msg']})
+            else:
+                gpt_msgs.append({'role': 'user', 'content': row['gpt_msg']})
+                prompt = row['gpt_msg']
+                
+        self.engine.conversation_history = self.engine.root_conversation_history + gpt_msgs
+        
+        # Check prompt TODO
+        #prompt = '\n'.join(gpt_msgs)
 
         # Get chat response
-        output = answer_question(prompt, self.df)
-
-        # Format new lines properly
-        output = clean_output(output)
+        output = self.engine.answer_question(prompt)
 
         # Combine prompt and output into a string and print
         output_msgs = "\n".join([f"{prompt}", f"{output}"])
@@ -127,7 +140,7 @@ class WhatsAppBot():
             
             for char in msg:
                 self.editable_div.send_keys(f'{char}')
-                delay(0.02)
+                delay(0.01)
             
             if submit:
                 self.editable_div.send_keys(Keys.ENTER)

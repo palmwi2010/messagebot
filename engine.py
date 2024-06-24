@@ -1,4 +1,4 @@
-"""Script to turn embeddings df into a response"""
+"""Class to turn embeddings df into a response"""
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist
@@ -9,147 +9,162 @@ import os
 from dotenv import load_dotenv
 import re
 
-# Load environment variables
-load_dotenv()
+class ChatEngine():
+    def __init__(self, chat_title, mood = ""):
+        # Load environment variables
+        load_dotenv()
+        
+        # Config
+        self.chat_title = chat_title
+        self.responder = os.getenv('RESPONDER')
+        self.api_key = os.getenv('API_KEY')
+        self.client = OpenAI(api_key = self.api_key)
+        self.mood = mood
+        
+        # Load in df
+        try:
+            fname = f'./embeddings/embeddings_{chat_title}.pkl'
+            self.df = pd.read_pickle(fname)
+        except:
+            raise Exception(f'Could not open file {fname}')
 
-# Config - whether to run timers
-run_timers = False
+        # If embedding has not been converted to np array, do this now
+        if type(self.df['embeddings'][0]) == 'str':
+            print("Embeddings not saved as np array. Converting from string now...")
+            self.df['embeddings'] = self.df['embeddings'].apply(eval).apply(np.array)
+        
+        # Set members and system prompt
+        self.members = self.get_chat_members()
+        self.system_prompt = self.create_system_prompt()
+        
+        # Set root conversation history (to be able to reset it later) and a rolling conversation history
+        self.root_conversation_history = [{"role": "system", "content": self.system_prompt}]
+        self.conversation_history = self.root_conversation_history
+            
 
-# Initialize OpenAI client
-#start = time.time()
-API_KEY = os.getenv('API_KEY')
-client = OpenAI(
-    api_key = API_KEY
-)
-#timer(start, func = "Openened OpenAI connection", run_timer = run_timers)
+    def create_system_prompt(self):
+        """Function to create the system prompt for the API"""
+        
+        # Get members 
+        members_str = ', '.join(self.members)
+        
+        return f"""You are {self.responder}, speaking in a Whatsapp chat with {members_str}. Your mood is very {self.mood}. You are so unbelievably {self.mood} and are beside yourself in tears. You are depressed about everything. In the context, messages marked member: [message] are from the given member, and messages marked {self.responder}: [message] are from you.
+        Answer as if you are {self.responder} and only {self.responder} based on the context provided and previous messages. Do not under any circumstances answer as anyone else. Stick to the current conversation topics and avoid random context shifts.
+        Be casual in the reply and keep it brief, but feel free to send multiple messages in one response separated by \n. Finish the message with a question back where appropriate to keep the conversation going."""
 
-
-def create_context(question, df, max_len = 1000):
-    """Create a context for a question by finding the most similar context from the dataframe"""
-
-    start = time.time()
-    # Get embeddings from the question
-    q_embeddings = client.embeddings.create(input = question, model="text-embedding-3-large").data[0].embedding
-    timer(start, func='Found prompt embeddings', run_timer = run_timers)
+        
+    def get_chat_members(self):
+        """Function to get all members excluding responder in the whatsapp chat"""
+        
+        members = []
+        for message in self.df['text']:
+            for line in message.split('\n'):
+                match = re.match(r'^([A-Za-z]+\s?[A-Za-z]*):', line)
+                if match is not None:
+                    member = match.group(1)
+                    if member not in members and member != self.responder:
+                        members.append(member)
+        return members
     
-    start = time.time()
-    # Get distances from the embeddings
-    df['distances'] = df["embeddings"].apply(lambda x: cdist([q_embeddings], [x], metric="Minkowski"))
-    timer(start, func='Found embedding distances', run_timer = run_timers)
-
-    start = time.time()
-    returns = []
-    cur_len = 0
-
-    # Sort by distance and add rows to context until it is too long
-    for i, row in df.sort_values("distances").iterrows():
-
-        # Add length of tokens to the current length
-        cur_len += row['n_tokens'] + 4
-
-        # If current length is too long, break
-        if cur_len > max_len:
-            break
-
-        # Add text to returns
-        returns.append(row['text'])
+    def create_context(self, question, max_tokens=500):
+        """Function to create the context for the model based on the question asked"""
         
-    timer(start, func = "Retrieved nearest embeddings", run_timer = run_timers)
+        # Create the question embeddings and calculate distances to them
+        q_embeddings = self.client.embeddings.create(input=question, model="text-embedding-3-large").data[0].embedding
+        self.df['distances'] = self.df["embeddings"].apply(lambda x: cdist([q_embeddings], [x], metric="Minkowski"))
 
-    return "\n\n###\n\n".join(returns)
+        # Preallocate conversations, current len and the counter
+        conversations, cur_len = [], 0
 
-
-def answer_question(question, df, model = "gpt-4o", max_len = 500, debug = False, max_tokens = 150, stop_sequence = None, rolling_context = ""):
-    """Answer a question based on the most similar context from the dataframe texts"""
-
-    # Create a context
-    context = create_context(question, df, max_len = max_len)
+        # Loop through all rows and add to the conversations if it's not already too long
+        for _, row in self.df.sort_values("distances").iterrows():
+            cur_len += row['n_tokens'] + 4
+            if cur_len > max_tokens:
+                break
+            conversations.append(row['text'])
+        
+        # Separate conversations with two new lines
+        return "\n\n".join(conversations)
     
-    # System prompt   
-    system_prompt = """You are Will, being spoken to over Whatsapp messages by Daisy. In the context, messages marked Daisy: [message] are from Daisy, and messages marked Will: [message] are from Will.
-                        Answer as if you are Will and only Will based on the context provided and previous messages. Do not under any circumstances answer as Daisy. 
-                        Be casual in the reply and keep it brief, but feel free to send multiple messages in one response separated by \n. Finish the message with a question back where appropriate to keep the conversation going."""
-
-    # If debug, print the raw model no
-    if debug:
-        print("Context:\n" + context)
-        print("\n\n")
     
-    # Get chat response
-    try:
-        # Create a chat completion using the question and context
-        response = client.chat.completions.create(
-            model = model, messages = [
-                {"role": "system", "content": system_prompt},
-                #{"role": "user", "content": f"Previous messages: {rolling_context}\n\n---\n\nContext: {context}\n\n---\n\nQuestion: {question}\n\n---\n\Will: "}
-                {"role": "user", "content": f"\n\n---\n\nContext: {context}\n\n---\n\nQuestion: {rolling_context}'\n'{question}\n\n---\nWill: "}
-            ],
-            temperature = 0.5,
-            max_tokens = max_tokens,
-            stop = stop_sequence
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(e)
-        return ""
+    def answer_question(self, question, model = "gpt-4o", max_context_tokens = 500, debug = False, max_output = 300):
+        """Answer a question based on the most similar context from the dataframe texts"""
 
+        # Create a context
+        context = self.create_context(question, max_tokens = max_context_tokens)
+        
+        # Create new question_context line
+        question_context = [{"role": "user", "content": f"Context: {context}\n\n---\n\nQuestion: {question}\n\n---\n\{self.responder}: "}]
+        messages = self.conversation_history + question_context
+        print(f"MESSAGES:\n{messages}")
 
-def run_program(chat_title):
-    """Program to run chatbot until user quits"""
-        
-    # Load in df
-    df = pd.read_pickle(f'./embeddings/embeddings_{chat_title}.pkl')
-
-    # If embedding has not been converted to np array, do this now
-    if type(df['embeddings'][0]) == 'str':
-        print("Embeddings not saved as np array. Converting from string now...")
-        df['embeddings'] = df['embeddings'].apply(eval).apply(np.array)
-        
-    # Find chat members
-    start = time.time()
-    members = []
-    for message in df['text']:
-        for line in message.split('\n'):
-            match = re.match(r'^([A-Za-z]+\s?[A-Za-z]*):', line)
-            if match is not None:
-                member = match.group(1)
-                if member not in members:
-                    members.append(member)
-    timer(start, "Found members")
-    print(members)
-        
-        
-    # Preset rolling context to blank string
-    rolling_context = ""
-    
-    while True:
-    
-        # Request user prompt
-        prompt = input("Please enter a message from Daisy (R to reset, X to quit): ")
-        
-        # Check for quit or reset
-        if prompt.lower() == 'x':
-            break
-        elif prompt.lower() == 'r':
-            rolling_context = ""
-            continue
+        # If debug, print the raw model no
+        if debug:
+            print("Context:\n" + context)
+            print("\n\n")
         
         # Get chat response
-        output = answer_question("Daisy: " + prompt, df, rolling_context = rolling_context)
+        try:
+            # Create a chat completion using the question and context
+            response = self.client.chat.completions.create(
+                model = model, messages = messages, temperature = 0.5, max_tokens = max_output)
+            
+            # Get answer
+            answer = clean_output(response.choices[0].message.content)
+            
+            # Add question and response to conversation history
+            self.conversation_history.append({"role": "user", "content": question})
+            self.conversation_history.append({'role': 'assistant', "content": answer})
+            
+            return answer
+        except Exception as e:
+            print(e)
+            return ""
         
-        # Format new lines properly
-        output = clean_output(output)
-        
-        # Combine prompt and output into a string and print
-        previous_msgs = "\n".join([f"Daisy: {prompt}", f"{output}"])
-        
-        # Make generated conversation
-        print(f"Generated conversation:\n{previous_msgs}")
-        
-        # Create remembered context
-        if rolling_context != "":
-            rolling_context += '\n'    
-        rolling_context = previous_msgs
     
+    def reset_conversation_history(self):
+        """Function to reset the conversation history so far"""
+        return [{"role": "system", "content": self.system_prompt}]
+        
+        
+    def run(self):
+        """Run chatbot with a command line interface"""
+            
+        # Loop in perpetuity
+        while True:
+        
+            # If there's more than one other member, set who to speak
+            if len(self.members) > 1:
+                sender = ""
+                while sender not in self.members:
+                    sender = input(f"Please select who you are sending a message from? Options are {', '.join(self.members)}: ")
+            else:
+                sender = self.members[0]
+        
+            # Request user prompt
+            prompt = input(f"Please enter a message from {sender} (R to reset, X to quit): ")
+            
+            # Check for quit or reset
+            if prompt.lower() == 'x':
+                break
+            elif prompt.lower() == 'r':
+                self.conversation_history = self.root_conversation_history
+                continue
+            
+            # Get chat response
+            question = f"{sender}: {prompt}"
+            output = self.answer_question(question)
+            
+            # Create previous msgs string
+            previous_msgs = [row['content'] for row in self.conversation_history if row['role'] != 'system']
+            previous_msgs = '\n'.join(previous_msgs)
+            
+            # Make generated conversation
+            print(f"Generated conversation:\n{previous_msgs}")
 
-run_program('daisy')
+
+# Start engine
+#engine = ChatEngine('daisy', 'angry')
+
+# Run engine
+#engine.run()

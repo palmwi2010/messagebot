@@ -5,10 +5,9 @@ import pandas as pd
 chat_label = "Daisy"
 msg_initial = True
 loop_num = 0
-df = pd.read_pickle('embeddings_check_embed.pkl')
 
 # Initialize whatsapp bot
-bot = WhatsAppBot(chat_label = chat_label, df=df)
+bot = WhatsAppBot(chat_label = chat_label)
 
 # Initalize whatsapp connection
 bot.initialize_driver()
