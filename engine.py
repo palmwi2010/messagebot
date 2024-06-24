@@ -82,7 +82,7 @@ def answer_question(question, df, model = "gpt-4o", max_len = 500, debug = False
             model = model, messages = [
                 {"role": "system", "content": system_prompt},
                 #{"role": "user", "content": f"Previous messages: {rolling_context}\n\n---\n\nContext: {context}\n\n---\n\nQuestion: {question}\n\n---\n\Will: "}
-                {"role": "user", "content": f"\n\n---\n\nContext: {context}\n\n---\n\nQuestion: {rolling_context}'\n'{question}\n\n---\n\Will: "}
+                {"role": "user", "content": f"\n\n---\n\nContext: {context}\n\n---\n\nQuestion: {rolling_context}'\n'{question}\n\n---\nWill: "}
             ],
             temperature = 0.5,
             max_tokens = max_tokens,

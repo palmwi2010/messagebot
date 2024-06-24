@@ -7,7 +7,7 @@ from openai import OpenAI
 import time
 import numpy as np
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv # type: ignore
 
 # Load environment variables and set api key
 load_dotenv()
@@ -34,7 +34,7 @@ def parse_transcript(chat_title):
             
     # Loop through lines to clean
     message_rows = []
-    for line in lines[18000:]:
+    for line in lines[19000:]:
                 
         # Find date and time
         pattern = r"\[(\d\d/\d\d/\d\d\d\d),\s(\d\d?:\d\d:\d\d\s?[A-Z]?M?)[^A-Za-z]*\s([A-Za-z]+\s?[A-Za-z]*):\s(.*)"
@@ -54,6 +54,11 @@ def parse_transcript(chat_title):
             
         # Check it's not a system message
         if message.find('\u200e') != -1:
+            continue
+
+        # Ignore if it contains a web url
+        match_web = re.search(r"(http).*", line)
+        if match_web is not None:
             continue
             
         # Format 24hr time
@@ -112,7 +117,7 @@ def make_conversations(texts, conversation_len = 15, rolling_window = 0.5, max_t
     leader = 0
     
     # Loop through text and add to conversations
-    while lagger < len(texts):
+    while lagger < len(texts) and len(conversations) < 100:
         
         # Set text
         if leader >= len(texts):
@@ -189,13 +194,14 @@ def preprocessor(chat_title):
         
     # Apply eval to convert embedding to numpy array
     try:
+        df = pd.read_csv(f'embeddings/embeddings_{chat_title}.csv')
         df['embeddings'] = df['embeddings'].apply(eval).apply(np.array)
     except:
         print("Error converting embeddings to np array. Saving with string embeddings...")
         
     # Save as pickle file
     try:
-        df.to_pickle(f'embeddings/embeddings_{chat_title}.csv')
+        df.to_pickle(f'embeddings/embeddings_{chat_title}.pkl')
     except:
         print("Error saving embedding as pickle")    
     
@@ -204,7 +210,19 @@ def timer(start, func = "Ran", run_timer = True):
     if run_timer:
         print(f"{func} in {round(time.time() - start,2)} seconds")
 
-    
+def init_dirs():
+    # List of directories to create
+    directories = ["transcripts", "processed", "embeddings"]
+
+    # Loop through the list and create each directory if it doesn't exist
+    for directory in directories:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            print(f"Directory '{directory}' created.")
+        else:
+            print(f"Directory '{directory}' already exists.")
+
+
 def delay(x):
     time.sleep(x)
     
@@ -226,8 +244,3 @@ def clean_output(msg):
     msg_str = '\n'.join(new_array)
     
     return msg_str
-
-#parse_transcript(chat_title)
-#preprocessor(chat_title)
-
-#def checker()
