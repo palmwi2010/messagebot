@@ -48,7 +48,7 @@ class ChatEngine():
         # Get members 
         members_str = ', '.join(self.members)
         
-        return f"""You are {self.responder}, speaking in a Whatsapp chat with {members_str}. Your mood is very {self.mood}. You are so unbelievably {self.mood} and are beside yourself in tears. You are depressed about everything. In the context, messages marked member: [message] are from the given member, and messages marked {self.responder}: [message] are from you.
+        return f"""You are {self.responder}, speaking in a Whatsapp chat with {members_str}. Your mood is extremely {self.mood}, and keep that mood throughout. In the context, messages marked member: [message] are from the given member, and messages marked {self.responder}: [message] are from you.
         Answer as if you are {self.responder} and only {self.responder} based on the context provided and previous messages. Do not under any circumstances answer as anyone else. Stick to the current conversation topics and avoid random context shifts.
         Be casual in the reply and keep it brief, but feel free to send multiple messages in one response separated by \n. Finish the message with a question back where appropriate to keep the conversation going."""
 
@@ -164,7 +164,7 @@ class ChatEngine():
 
 
 # Start engine
-#engine = ChatEngine('daisy', 'angry')
+engine = ChatEngine('Daisy', 'funny')
 
 # Run engine
-#engine.run()
+engine.run()

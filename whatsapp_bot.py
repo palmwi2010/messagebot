@@ -10,11 +10,13 @@ import pandas as pd
 
 
 class WhatsAppBot():
+    """Class to interact with WhatsApp, and use ChatEngine class to generate and send replies""" 
+    
     def __init__(self, chat_label):
         self.chat_label = chat_label
         self.messages = None
-        self.editable_div = None
-        self.prompt_row_length = 5
+        self.msg_textbox = None
+        self.prompt_row_length = 6
         self.msg_refresh_delay = 15
         self.engine = ChatEngine(chat_label, mood = "sad")
     
@@ -37,7 +39,7 @@ class WhatsAppBot():
         
         # Save the editable div
         try:
-            self.editable_div = self.driver.find_element(By.XPATH, "(//div[contains(@class, 'x1hx0egp') and @role='textbox'])[2]")
+            self.msg_textbox = self.driver.find_element(By.XPATH, "(//div[contains(@class, 'x1hx0egp') and @role='textbox'])[2]")
         except:
             raise Exception(f"Unable to find input text menu")
         
@@ -65,6 +67,7 @@ class WhatsAppBot():
                 parent_div = msg.parent.parent
                 data_pre_plain_text = parent_div.get('data-pre-plain-text')
                 
+                # Ignore if it didn't have a name
                 if data_pre_plain_text is None:
                     continue
                 
@@ -82,30 +85,25 @@ class WhatsAppBot():
     def generate_messages(self, message_list):
         """Generate messages using OpenAI based on the previous messages in the list"""
         
-        # Remove my most recent messages for ease of testing
-        rows_test = message_list
-
         # Set the start index to avoid taking an index out of bounds
-        start_idx = -1 * min(self.prompt_row_length, len(rows_test))
+        start_idx = -1 * min(self.prompt_row_length, len(message_list))
 
         # Loop back through from idx
-        question_list = rows_test[start_idx:]
-        #gpt_msgs = [row['gpt_msg'] for row in question_list]
+        question_list = message_list[start_idx:]
         
-        # Create gpt messages
+        # Create gpt messages and add to conversation history
         gpt_msgs = []
+        prompt = ""
         for row in question_list:
             if row['sender'] == self.engine.responder:
                 gpt_msgs.append({'role': 'assistant', 'content': row['gpt_msg']})
             else:
                 gpt_msgs.append({'role': 'user', 'content': row['gpt_msg']})
                 prompt = row['gpt_msg']
-                
+        
+        # Add to the conversation history
         self.engine.conversation_history = self.engine.root_conversation_history + gpt_msgs
         
-        # Check prompt TODO
-        #prompt = '\n'.join(gpt_msgs)
-
         # Get chat response
         output = self.engine.answer_question(prompt)
 
@@ -136,14 +134,18 @@ class WhatsAppBot():
     
     def submit_messages(self, messages, submit=False):
         """Function actually send messages on whatsapp"""
+        
+        # Loop through each message
         for msg in messages:
             
+            # Loop through characters to create typing impression
             for char in msg:
-                self.editable_div.send_keys(f'{char}')
+                self.msg_textbox.send_keys(f'{char}')
                 delay(0.01)
             
+            # Submit if selected
             if submit:
-                self.editable_div.send_keys(Keys.ENTER)
+                self.msg_textbox.send_keys(Keys.ENTER)
             self.delay_vs()
             
     def check_new_messages(self):
@@ -156,8 +158,7 @@ class WhatsAppBot():
             current_messages = self.messages
             
         # Filter for only messages received
-        print(current_messages[-1])
-        current_messages_received = [row for row in current_messages if row['sender'] == 'Daisy']
+        current_messages_received = [row for row in current_messages if row['sender'] != self.engine.responder]
         
         # Loop until new message sent
         while True:
@@ -166,7 +167,7 @@ class WhatsAppBot():
             latest_messages = self.get_messages()
             
             # Filter for only messages received
-            latest_messages_received = [row for row in latest_messages if row['sender'] == 'Daisy']
+            latest_messages_received = [row for row in latest_messages if row['sender'] != self.engine.responder]
             
             # Check if latest message is different
             if latest_messages_received[-1]['msg'] != current_messages_received[-1]['msg']:
@@ -174,7 +175,20 @@ class WhatsAppBot():
             else:
                 self.delay_refresh()
                 
+    # Set delay function
+    def delay(self, length):
         
+        # Make delay mapping
+        delay_map = {'vs': 0.5, 's': 2, 'm': 5, 'l': 10, 'vl': 1000, 'refresh': self.msg_refresh_delay}
+        
+        # Check valid length
+        if length not in delay_map:
+            print("Error using delay - length not in delay map options. Running with delay m as placeholder")
+            length = 'm'
+
+        # Initiate sleep
+        time.sleep(delay_map[length])
+
     # Set delay functions
     def delay_vs(self):
         delay(0.5)
@@ -193,99 +207,3 @@ class WhatsAppBot():
         
     def delay_refresh(self):
         delay(self.msg_refresh_delay)
-"""         
-
-def main():
-
-    # Start driver and navigate to chrome
-    driver = webdriver.Chrome()
-    driver.get("https://web.whatsapp.com/")
-
-    # Wait to sign in using whatsapp and then press to continue
-    input('Press when ready to get page source:')
-
-    # Find and click the chat with user
-    selenium_span = driver.find_element(By.XPATH, f"//span[text()='{chat_label}']")
-    selenium_span.click()
-    delay(vs)
-
-    # Locate the div element that we will use to send messages using XPath
-    editable_div = driver.find_element(By.XPATH, "(//div[contains(@class, 'x1hx0egp') and @role='textbox'])[2]")
-
-    # Prepare soup and message spans for finding messages
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-    messages = soup.find_all(class_="_ao3e")
-
-    # Assign messages and senders
-    rows = []
-    for msg in messages:
-        # Content is one span beneath the class found
-        msg_children = msg.findChildren("span")
-        
-        # Other same class exist so we need to ignore them
-        if len(msg_children) > 0:
-            
-            # Assign to message content
-            msg_content = msg_children[0].contents[0]
-            
-            # To find the sender, we go up 2 parents to a plan text property
-            parent_div = msg.parent.parent
-            data_pre_plain_text = parent_div.get('data-pre-plain-text')
-            
-            # Use re library to find just name
-            match = re.search('([A-Za-z]+):', data_pre_plain_text)
-            name = match.group(1)
-            
-            # Add message and sender to rows
-            rows.append({'sender': name, 'msg': msg_content, 'gpt_msg': f"{name}: {msg_content}"})
-
-    # Remove my most recent message for ease of testing
-    rows_test = rows[:-1]
-
-    # Set parameters for number of messages to include in context and question
-    max_row_question = 5
-    start_idx = -1 * min(max_row_question, len(rows_test))
-
-    # Loop back through from idx
-    question_list = rows_test[start_idx:]
-    gpt_msgs = [row['gpt_msg'] for row in question_list]
-    prompt = '\n'.join(gpt_msgs)
-
-    # Get chat response
-    output = answer_question(prompt, df)
-
-    # Format new lines properly
-    output = clean_output(output)
-
-    # Combine prompt and output into a string and print
-    output_msgs = "\n".join([f"{prompt}", f"{output}"])
-
-    # Print generated conversation
-    print(f"Generated conversation:\n{output_msgs}")
-
-    # Prepare messages to be sent
-    output_array = output.split('\n')
-
-    # Find just the message content
-    output_clean = []
-    for msg in output_array:
-        
-        # Remove whitespace and special characters
-        msg = msg.strip()
-        msg = ''.join(char for char in msg if ord(char) <= 0xFFFF)
-        
-        # Remove full stop and take only the message
-        if msg[-1] == '.':
-            msg = msg[:-1]
-        match = re.search(r'^[A-Za-z]+: (.*)', msg)
-        output_clean.append(match.group(1))
-        
-    print(output_clean)
-    for msg in output_clean:
-        editable_div.send_keys(f'{msg}')
-        editable_div.send_keys(Keys.ENTER)
-        delay(m)
-
-    
-    delay(vl)
-"""
