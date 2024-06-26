@@ -5,20 +5,18 @@ from bs4 import BeautifulSoup
 import time
 import re
 from engine import ChatEngine
-from utils import delay, clean_output
-import pandas as pd
 
 
 class WhatsAppBot():
     """Class to interact with WhatsApp, and use ChatEngine class to generate and send replies""" 
     
-    def __init__(self, chat_label):
+    def __init__(self, chat_label, mood = ""):
         self.chat_label = chat_label
         self.messages = None
         self.msg_textbox = None
         self.prompt_row_length = 6
         self.msg_refresh_delay = 15
-        self.engine = ChatEngine(chat_label, mood = "sad")
+        self.engine = ChatEngine(chat_label, mood = mood)
     
     
     def initialize_driver(self):
@@ -27,15 +25,15 @@ class WhatsAppBot():
         # Set connection to chrome and wait for input while user logs in
         self.driver = webdriver.Chrome()
         self.driver.get("https://web.whatsapp.com/")
-        input('Press when ready to get page source')
+        input('Press any key when ready to get page source')
         
         # Find and click the chat with user
         try:
             selenium_span = self.driver.find_element(By.XPATH, f"//span[text()='{self.chat_label}']")
         except:
-            raise Exception(f"Unable to find {self.chat_label} in WhatsApp menu")
+            raise Exception(f"Unable to find {self.chat_label} in WhatsApp menu. Ensure {self.chat_label} matches a recent Whatsapp chat (case sensitive).")
         selenium_span.click()
-        self.delay_vs()
+        self.delay('vs')
         
         # Save the editable div
         try:
@@ -141,12 +139,13 @@ class WhatsAppBot():
             # Loop through characters to create typing impression
             for char in msg:
                 self.msg_textbox.send_keys(f'{char}')
-                delay(0.01)
+                self.delay('typing')
             
             # Submit if selected
             if submit:
                 self.msg_textbox.send_keys(Keys.ENTER)
-            self.delay_vs()
+            self.delay('vs')
+            
             
     def check_new_messages(self):
         """Function that will run until a new message is received"""
@@ -173,13 +172,14 @@ class WhatsAppBot():
             if latest_messages_received[-1]['msg'] != current_messages_received[-1]['msg']:
                 break
             else:
-                self.delay_refresh()
+                self.delay('refresh')
+                
                 
     # Set delay function
     def delay(self, length):
         
         # Make delay mapping
-        delay_map = {'vs': 0.5, 's': 2, 'm': 5, 'l': 10, 'vl': 1000, 'refresh': self.msg_refresh_delay}
+        delay_map = {'vs': 0.5, 's': 2, 'm': 5, 'l': 10, 'vl': 1000, 'refresh': self.msg_refresh_delay, 'typing': 0.01}
         
         # Check valid length
         if length not in delay_map:
@@ -188,22 +188,3 @@ class WhatsAppBot():
 
         # Initiate sleep
         time.sleep(delay_map[length])
-
-    # Set delay functions
-    def delay_vs(self):
-        delay(0.5)
-
-    def delay_s(self):
-        delay(2)
-        
-    def delay_m(self):
-        delay(5)
-        
-    def delay_l(self):
-        delay(10)
-        
-    def delay_vl(self):
-        delay(1000)
-        
-    def delay_refresh(self):
-        delay(self.msg_refresh_delay)

@@ -4,7 +4,6 @@ import pandas as pd
 from scipy.spatial.distance import cdist
 from openai import OpenAI
 import time
-from utils import timer, clean_output
 import os
 from dotenv import load_dotenv
 import re
@@ -15,7 +14,7 @@ class ChatEngine():
         load_dotenv()
         
         # Config
-        self.chat_title = chat_title
+        self.chat_title = chat_title.replace(' ', '').lower()
         self.responder = os.getenv('RESPONDER')
         self.api_key = os.getenv('API_KEY')
         self.client = OpenAI(api_key = self.api_key)
@@ -23,7 +22,7 @@ class ChatEngine():
         
         # Load in df
         try:
-            fname = f'./embeddings/embeddings_{chat_title}.pkl'
+            fname = f'./embeddings/embeddings_{self.chat_title}.pkl'
             self.df = pd.read_pickle(fname)
         except:
             raise Exception(f'Could not open file {fname}')
@@ -48,22 +47,41 @@ class ChatEngine():
         # Get members 
         members_str = ', '.join(self.members)
         
-        return f"""You are {self.responder}, speaking in a Whatsapp chat with {members_str}. Your mood is extremely {self.mood}, and keep that mood throughout. In the context, messages marked member: [message] are from the given member, and messages marked {self.responder}: [message] are from you.
-        Answer as if you are {self.responder} and only {self.responder} based on the context provided and previous messages. Do not under any circumstances answer as anyone else. Stick to the current conversation topics and avoid random context shifts.
-        Be casual in the reply and keep it brief, but feel free to send multiple messages in one response separated by \n. Finish the message with a question back where appropriate to keep the conversation going."""
+        # Add mood string
+        if self.mood != "":
+            mood_prompt = f"Your mood is extremely {self.mood}. Keep mood {self.mood} for all interactions. "
+        else:
+            mood_prompt = ""
+        
+        return f"""You are {self.responder}, speaking in a Whatsapp chat with {members_str}. {mood_prompt}In the context, messages marked member: [message] are from the given member, and messages marked {self.responder}: [message] are from you.
+Answer as if you are {self.responder} and only {self.responder} based on the context provided and previous messages. Do not under any circumstances answer as anyone else. Stick to the current conversation topics and avoid random context shifts.
+Be casual in the reply and keep it brief, but feel free to send multiple messages in one response separated by \n. Finish the message with a question back where appropriate to keep the conversation going."""
 
         
     def get_chat_members(self):
         """Function to get all members excluding responder in the whatsapp chat"""
         
+        # We will check the responder is found in the messages
+        responder_found = False
+        
+        # Loop through all chat messages and gather all unique members
         members = []
         for message in self.df['text']:
+            if type(message) != str:
+                continue
             for line in message.split('\n'):
                 match = re.match(r'^([A-Za-z]+\s?[A-Za-z]*):', line)
                 if match is not None:
                     member = match.group(1)
                     if member not in members and member != self.responder:
                         members.append(member)
+                    elif member == self.responder:
+                        responder_found = True
+
+        # Raise an exception if the responder wasn't found in the chat
+        if not responder_found:
+            raise Exception(f'Message responder {self.responder} (set in .env) was not found in the chat history. Please check name matches Whatsapp name.')
+
         return members
     
     def create_context(self, question, max_tokens=500):
@@ -96,7 +114,6 @@ class ChatEngine():
         # Create new question_context line
         question_context = [{"role": "user", "content": f"Context: {context}\n\n---\n\nQuestion: {question}\n\n---\n\{self.responder}: "}]
         messages = self.conversation_history + question_context
-        print(f"MESSAGES:\n{messages}")
 
         # If debug, print the raw model no
         if debug:
@@ -110,7 +127,7 @@ class ChatEngine():
                 model = model, messages = messages, temperature = 0.5, max_tokens = max_output)
             
             # Get answer
-            answer = clean_output(response.choices[0].message.content)
+            answer = self.clean_output(response.choices[0].message.content)
             
             # Add question and response to conversation history
             self.conversation_history.append({"role": "user", "content": question})
@@ -121,11 +138,33 @@ class ChatEngine():
             print(e)
             return ""
         
-    
-    def reset_conversation_history(self):
-        """Function to reset the conversation history so far"""
-        return [{"role": "system", "content": self.system_prompt}]
+    def clean_output(self, msg):
         
+        # Split into an array of msgs
+        msg_array = msg.split('\n')
+        
+        # Remove any mention of Will:
+        new_array = []
+        for msg in msg_array:
+            # Ignore empty messages
+            if msg == "" or msg == ".":
+                continue
+            
+            # Remove full stops from messages
+            if msg[-1] == '.':
+                msg = msg[:-1]
+                
+            # Add sender name to the message if not already there
+            match = re.search(r'([A-Za-z]+\s?[A-Za-z]*):.*', msg)
+            if match is None:
+                new_array.append(f'{self_name}: ' + msg)
+            else:
+                new_array.append(msg)
+            
+        msg_str = '\n'.join(new_array)
+        
+        return msg_str
+
         
     def run(self):
         """Run chatbot with a command line interface"""
@@ -161,10 +200,3 @@ class ChatEngine():
             
             # Make generated conversation
             print(f"Generated conversation:\n{previous_msgs}")
-
-
-# Start engine
-engine = ChatEngine('Daisy', 'funny')
-
-# Run engine
-engine.run()
